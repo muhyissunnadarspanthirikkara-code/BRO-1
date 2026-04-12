@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BRO ONE - The Open World Experience</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;900&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <style>
+    :root {
+      --primary: #f39c12;
+      --secondary: #d35400;
+      --accent: #e74c3c;
+      --bg-dark: #0a0515;
+    }
+
+    body, html {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      background: var(--bg-dark);
+      font-family: 'Outfit', sans-serif;
+      overflow: hidden;
+      color: white;
+    }
+
+    /* Loading Screen */
+    #loading-screen {
+      position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: #000;
+      z-index: 1000;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      transition: opacity 1s ease-in-out;
+    }
+
+    .loader-title {
+      font-size: 80px; font-weight: 900;
+      letter-spacing: 10px; color: var(--primary);
+      text-shadow: 0 0 20px rgba(243, 156, 18, 0.5);
+      margin-bottom: 20px; animation: pulse 2s infinite;
+    }
+
+    .progress-bar {
+      width: 300px; height: 4px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px; overflow: hidden;
+    }
+
+    .progress-fill {
+      width: 0%; height: 100%;
+      background: var(--primary);
+      transition: width 0.1s linear;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(0.98); }
+    }
+
+    /* GAME CANVAS */
+    #webgl { width: 100%; height: 100%; position: absolute; }
+    #css-renderer { position: absolute; top:0; left:0; width:100%; height:100%; z-index:1; pointer-events:none; }
+
+    /* HUD */
+    #hud {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none; z-index: 10;
+      display: none;
+    }
+
+    .mini-map {
+      position: absolute; bottom: 30px; left: 30px;
+      width: 150px; height: 150px;
+      background: rgba(0,0,0,0.6);
+      border: 3px solid var(--primary);
+      border-radius: 50%;
+    }
+
+    .wanted-level {
+      position: absolute; top: 30px; right: 30px;
+      display: flex; gap: 5px;
+    }
+
+    .star { color: rgba(255,255,255,0.2); font-size: 30px; }
+    .star.active { color: var(--primary); text-shadow: 0 0 10px var(--primary); }
+
+    .mission-prompt {
+      position: absolute; bottom: 100px; width: 100%;
+      text-align: center; font-size: 24px; font-weight: 600;
+      color: var(--primary); text-transform: uppercase;
+      letter-spacing: 3px; animation: blink 1s infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* MENU */
+    #main-menu {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(5px);
+      z-index: 500;
+      display: none;
+      flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+
+    .menu-btn {
+      background: none; border: none;
+      color: white; font-size: 40px; font-weight: 800;
+      margin: 15px; cursor: pointer;
+      transition: color 0.3s, transform 0.3s;
+      text-transform: uppercase; letter-spacing: 5px;
+    }
+
+    .menu-btn:hover { color: var(--primary); transform: translateX(20px); }
+
+    /* CAR STYLE */
+    #cybertruck {
+      width: 350px; height: 120px;
+      background: #111; border: 3px solid #f39c12;
+      border-radius: 15px; color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 32px;
+      box-shadow: 0 0 30px rgba(243, 156, 18, 0.4);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading-screen">
+    <div class="loader-title">BRO ONE</div>
+    <div class="progress-bar"><div class="progress-fill" id="fill"></div></div>
+    <div style="margin-top: 10px; font-size: 12px; letter-spacing: 2px;">SYNCING CITY ASSETS...</div>
+  </div>
+
+  <div id="main-menu">
+    <div style="font-size: 20px; letter-spacing: 5px; margin-bottom: 50px;">VERSION 1.0 (BRO 1 FOLDER)</div>
+    <button class="menu-btn" onclick="startGame()">START STORY</button>
+    <button class="menu-btn" onclick="startGame()">FREE ROAM</button>
+    <button class="menu-btn" style="color: grey;">MULTIPLAYER (LOCKED)</button>
+    <button class="menu-btn" style="font-size: 20px; margin-top: 50px;">EXIT TO OS</button>
+  </div>
+
+  <div id="hud">
+    <div class="mini-map"></div>
+    <div class="wanted-level">
+      <i class="ph-fill ph-star star active"></i>
+      <i class="ph-fill ph-star star active"></i>
+      <i class="ph-fill ph-star star"></i>
+      <i class="ph-fill ph-star star"></i>
+      <i class="ph-fill ph-star star"></i>
+    </div>
+    <div class="mission-prompt">DRIVE TO THE RED MARKER</div>
+  </div>
+
+  <div id="webgl"></div>
+  <div id="css-renderer"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS3DRenderer.js"></script>
+
+  <script>
+    // FAKE LOADING PROGRESS
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += Math.random() * 5;
+      document.getElementById('fill').style.width = Math.min(progress, 100) + '%';
+      if(progress >= 100) {
+        clearInterval(interval);
+        setTimeout(() => {
+          document.getElementById('loading-screen').style.opacity = '0';
+          setTimeout(() => {
+            document.getElementById('loading-screen').style.display = 'none';
+            document.getElementById('main-menu').style.display = 'flex';
+          }, 1000);
+        }, 500);
+      }
+    }, 100);
+
+    function startGame() {
+      document.getElementById('main-menu').style.display = 'none';
+      document.getElementById('hud').style.display = 'block';
+      gameActive = true;
+    }
+
+    // GAME ENGINE
+    let gameActive = false;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0515);
+    scene.fog = new THREE.FogExp2(0x0a0515, 0.0002);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 20000);
+    camera.position.set(0, 1000, 2000);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('webgl').appendChild(renderer.domElement);
+
+    const cssRenderer = new THREE.CSS3DRenderer();
+    cssRenderer.setSize(window.innerWidth, window.innerHeight);
+    document.getElementById('css-renderer').appendChild(cssRenderer.domElement);
+    
+    // LIGHTS
+    const ambient = new THREE.AmbientLight(0xffffff, 0.3); scene.add(ambient);
+    const orangeSun = new THREE.DirectionalLight(0xffaa00, 1); orangeSun.position.set(5000, 2000, 2000); scene.add(orangeSun);
+
+    // ROAD & BUILDINGS
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(100000, 5000), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+    ground.rotation.x = -Math.PI/2; scene.add(ground);
+
+    for(let i=-50; i<50; i++) {
+      const h = 500 + Math.random()*3000;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(800, h, 800), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+      b.position.set(i * 1500, h/2, Math.random() > 0.5 ? -2000 : 2000); 
+      scene.add(b);
+    }
+
+    // PLAYER CAR
+    const ctDiv = document.createElement('div');
+    ctDiv.id = 'cybertruck'; ctDiv.innerText = 'BRO ONE';
+    const car = new THREE.CSS3DObject(ctDiv); scene.add(car);
+    car.position.set(0, 100, 0);
+
+    const keys = {};
+    window.onkeydown = (e) => keys[e.key.toLowerCase()] = true;
+    window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+
+    let velX = 0;
+    function animate() {
+      requestAnimationFrame(animate);
+      if(gameActive) {
+        if(keys['w']) velX += 1;
+        if(keys['s']) velX -= 1;
+        velX *= 0.95;
+        car.position.x += velX;
+
+        if(keys['a']) car.position.z -= 10;
+        if(keys['d']) car.position.z += 10;
+        
+        // CAMERA CHASE
+        camera.position.x += (car.position.x - camera.position.x) * 0.1;
+        camera.position.z += ((car.position.z + 1200) - camera.position.z) * 0.1;
+        camera.lookAt(car.position.x, 200, car.position.z);
+      }
+      renderer.render(scene, camera);
+      cssRenderer.render(scene, camera);
+    }
+    animate();
+
+    window.onresize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      cssRenderer.setSize(window.innerWidth, window.innerHeight);
+    };
+  </script>
+</body>
+</html>
