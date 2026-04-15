@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mustang Drive - Open World</title>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #050510; font-family: 'Outfit', sans-serif; }
+        #ui { 
+            position: absolute; 
+            bottom: 30px; 
+            left: 30px; 
+            color: #fff; 
+            background: rgba(0,0,0,0.8); 
+            padding: 20px; 
+            border-radius: 12px; 
+            border-left: 5px solid #ff0055; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+        #ui b { color: #ff0055; font-size: 1.2em; display: block; margin-bottom: 10px; }
+        .hint { color: #00f2ff; font-weight: bold; }
+        canvas { display: block; }
+        #crosshair { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            width: 8px; 
+            height: 8px; 
+            background: rgba(255,255,255,0.8);
+            transform: translate(-50%, -50%); 
+            border-radius: 50%; 
+            pointer-events: none; 
+            box-shadow: 0 0 10px #fff;
+        }
+        #speedometer {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            color: #ff0055;
+            font-size: 2em;
+            font-weight: bold;
+            display: none;
+            text-shadow: 0 0 10px rgba(255,0,85,0.5);
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="ui">
+        <b>MISSION: DRIVE MUSTANG</b>
+        WASD - Move / Drive<br>
+        SPACE - Jump / Brake<br>
+        <span class="hint">F - ENTER / EXIT VEHICLE</span><br>
+        MOUSE - Look
+    </div>
+    <div id="crosshair"></div>
+    <div id="speedometer">0 KM/H</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050510);
+        scene.fog = new THREE.FogExp2(0x050510, 0.015);
+        
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0x404040, 1);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2);
+        sunLight.position.set(50, 100, 50);
+        sunLight.castShadow = true;
+        scene.add(sunLight);
+
+        // --- PHYSICS WORLD ---
+        const world = new CANNON.World();
+        world.gravity.set(0, -20, 0);
+        world.broadphase = new CANNON.SAPBroadphase(world);
+        world.defaultContactMaterial.friction = 0.5;
+
+        // Ground
+        const groundMat = new CANNON.Material("ground");
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({ mass: 0, material: groundMat });
+        groundBody.addShape(groundShape);
+        groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+        world.addBody(groundBody);
+
+        const grid = new THREE.GridHelper(500, 100, 0xff0055, 0x222244);
+        scene.add(grid);
+
+        // Ground Visual
+        const groundMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(1000, 1000),
+            new THREE.MeshStandardMaterial({ color: 0x0a0a1a })
+        );
+        groundMesh.rotation.x = -Math.PI / 2;
+        groundMesh.receiveShadow = true;
+        scene.add(groundMesh);
+
+        // --- PLAYER ---
+        const playerBody = new CANNON.Body({
+            mass: 5,
+            shape: new CANNON.Sphere(1),
+            fixedRotation: true
+        });
+        playerBody.position.set(0, 5, 0);
+        world.addBody(playerBody);
+
+        const playerMesh = new THREE.Mesh(
+            new THREE.CapsuleGeometry(0.5, 1, 4, 8),
+            new THREE.MeshStandardMaterial({ color: 0x00f2ff, emissive: 0x004444 })
+        );
+        scene.add(playerMesh);
+
+        // --- VEHICLE SETUP (RAYCAST) ---
+        const chassisShape = new CANNON.Box(new CANNON.Vec3(1, 0.5, 2.5));
+        const chassisBody = new CANNON.Body({ mass: 1500 });
+        chassisBody.addShape(chassisShape);
+        chassisBody.position.set(10, 2, -10);
+
+        const vehicle = new CANNON.RaycastVehicle({
+            chassisBody: chassisBody,
+            indexRightAxis: 0,
+            indexUpAxis: 1,
+            indexForwardAxis: 2
+        });
+
+        const wheelOptions = {
+            radius: 0.4,
+            directionLocal: new CANNON.Vec3(0, -1, 0),
+            suspensionStiffness: 30,
+            suspensionRestLength: 0.3,
+            frictionSlip: 1.4,
+            dampingRelaxation: 2.3,
+            dampingCompression: 4.4,
+            maxSuspensionForce: 100000,
+            rollInfluence: 0.01,
+            axleLocal: new CANNON.Vec3(1, 0, 0),
+            chassisConnectionPointLocal: new CANNON.Vec3(1, 1, 0),
+            maxSuspensionTravel: 0.3,
+            customSlidingRotationalSpeed: -30,
+            useCustomSlidingRotationalSpeed: true
+        };
+
+        // Front Left
+        wheelOptions.chassisConnectionPointLocal.set(-1, 0, 1.5);
+        vehicle.addWheel(wheelOptions);
+        // Front Right
+        wheelOptions.chassisConnectionPointLocal.set(1, 0, 1.5);
+        vehicle.addWheel(wheelOptions);
+        // Rear Left
+        wheelOptions.chassisConnectionPointLocal.set(-1, 0, -1.5);
+        vehicle.addWheel(wheelOptions);
+        // Rear Right
+        wheelOptions.chassisConnectionPointLocal.set(1, 0, -1.5);
+        vehicle.addWheel(wheelOptions);
+
+        vehicle.addToWorld(world);
+
+        // Visual Chassis (Placeholder until GLB is provided)
+        const chassisMesh = new THREE.Group();
+        const bodyMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(2, 1, 5),
+            new THREE.MeshStandardMaterial({ color: 0xff0055, roughness: 0.1, metalness: 0.8 })
+        );
+        chassisMesh.add(bodyMesh);
+        scene.add(chassisMesh);
+
+        // Visual Wheels
+        const wheelMeshes = [];
+        const wheelGeom = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 20);
+        wheelGeom.rotateZ(Math.PI / 2);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+
+        for (let i = 0; i < 4; i++) {
+            const mesh = new THREE.Mesh(wheelGeom, wheelMat);
+            scene.add(mesh);
+            wheelMeshes.push(mesh);
+        }
+
+        // --- LOAD MUSTANG (If GLB exists) ---
+        const loader = new GLTFLoader();
+        loader.load('./car/Mustang.glb', (gltf) => {
+            const model = gltf.scene;
+            model.scale.set(1.2, 1.2, 1.2);
+            model.rotation.y = Math.PI; // Adjust orientation
+            chassisMesh.remove(bodyMesh); // Remove placeholder
+            chassisMesh.add(model);
+            console.log("Mustang model loaded!");
+        }, undefined, (error) => {
+            console.warn("Mustang.glb not found, using placeholder. Export Mustang 13.04.2021 Compressed.blend to './car/Mustang.glb'");
+        });
+
+        // --- STATE ---
+        let isDriving = false;
+        const keys = { w: false, a: false, s: false, d: false, space: false };
+
+        // --- CONTROLS ---
+        const controls = new PointerLockControls(camera, document.body);
+        document.addEventListener('click', () => { if(!controls.isLocked) controls.lock(); });
+
+        document.addEventListener('keydown', (e) => { 
+            const k = e.code.toLowerCase().replace('key', '');
+            if(keys.hasOwnProperty(k)) keys[k] = true;
+            if(e.code === 'Space') keys.space = true;
+            
+            // Toggle Interaction
+            if (e.code === 'KeyF') {
+                if (isDriving) {
+                    exitVehicle();
+                } else {
+                    checkVehicleInteraction();
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => { 
+            const k = e.code.toLowerCase().replace('key', '');
+            if(keys.hasOwnProperty(k)) keys[k] = false;
+            if(e.code === 'Space') keys.space = false;
+        });
+
+        function checkVehicleInteraction() {
+            const dist = playerBody.position.distanceTo(chassisBody.position);
+            if (dist < 4) {
+                enterVehicle();
+            }
+        }
+
+        function enterVehicle() {
+            isDriving = true;
+            scene.remove(playerMesh);
+            document.getElementById('speedometer').style.display = 'block';
+            document.getElementById('crosshair').style.display = 'none';
+        }
+
+        function exitVehicle() {
+            isDriving = false;
+            playerBody.position.copy(chassisBody.position);
+            playerBody.position.x += 3; // Step out to the side
+            scene.add(playerMesh);
+            document.getElementById('speedometer').style.display = 'none';
+            document.getElementById('crosshair').style.display = 'block';
+        }
+
+        // --- ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+        const speedometer = document.getElementById('speedometer');
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = Math.min(clock.getDelta(), 0.1);
+            world.step(1/60, delta);
+
+            if (isDriving) {
+                // Driving Logic
+                const engineForce = 2000;
+                const steeringValue = 0.5;
+                const brakeForce = 100;
+
+                // Reset
+                vehicle.setSteeringValue(0, 0);
+                vehicle.setSteeringValue(0, 1);
+                vehicle.applyEngineForce(0, 2);
+                vehicle.applyEngineForce(0, 3);
+                vehicle.setBrake(0, 0);
+                vehicle.setBrake(0, 1);
+                vehicle.setBrake(0, 2);
+                vehicle.setBrake(0, 3);
+
+                if (keys.w) { vehicle.applyEngineForce(-engineForce, 2); vehicle.applyEngineForce(-engineForce, 3); }
+                if (keys.s) { vehicle.applyEngineForce(engineForce, 2); vehicle.applyEngineForce(engineForce, 3); }
+                if (keys.a) { vehicle.setSteeringValue(steeringValue, 0); vehicle.setSteeringValue(steeringValue, 1); }
+                if (keys.d) { vehicle.setSteeringValue(-steeringValue, 0); vehicle.setSteeringValue(-steeringValue, 1); }
+                if (keys.space) {
+                    vehicle.setBrake(brakeForce, 0);
+                    vehicle.setBrake(brakeForce, 1);
+                    vehicle.setBrake(brakeForce, 2);
+                    vehicle.setBrake(brakeForce, 3);
+                }
+
+                // Camera follow car
+                const relativeCameraOffset = new THREE.Vector3(0, 3, -8);
+                const cameraOffset = relativeCameraOffset.applyMatrix4(chassisMesh.matrixWorld);
+                camera.position.lerp(cameraOffset, 0.1);
+                camera.lookAt(chassisMesh.position);
+
+                // Speed UI
+                const speed = Math.abs(chassisBody.velocity.length() * 3.6).toFixed(0);
+                speedometer.innerText = `${speed} KM/H`;
+
+            } else {
+                // Character Logic
+                if (controls.isLocked) {
+                    const moveVector = new THREE.Vector3();
+                    if (keys.w) moveVector.z -= 1;
+                    if (keys.s) moveVector.z += 1;
+                    if (keys.a) moveVector.x -= 1;
+                    if (keys.d) moveVector.x += 1;
+
+                    moveVector.normalize().multiplyScalar(20 * delta);
+                    moveVector.applyQuaternion(camera.quaternion);
+                    
+                    playerBody.velocity.x += moveVector.x;
+                    playerBody.velocity.z += moveVector.z;
+
+                    if (keys.space && Math.abs(playerBody.velocity.y) < 0.1) {
+                        playerBody.velocity.y = 10;
+                    }
+                }
+
+                // Camera follow player
+                camera.position.copy(playerBody.position);
+                camera.position.y += 1.5;
+                playerMesh.position.copy(playerBody.position);
+                playerMesh.quaternion.copy(camera.quaternion);
+                playerMesh.quaternion.x = 0;
+                playerMesh.quaternion.z = 0;
+            }
+
+            // Sync Car Visuals
+            chassisMesh.position.copy(chassisBody.position);
+            chassisMesh.quaternion.copy(chassisBody.quaternion);
+
+            for (let i = 0; i < vehicle.wheelInfos.length; i++) {
+                vehicle.updateWheelTransform(i);
+                const t = vehicle.wheelInfos[i].worldTransform;
+                wheelMeshes[i].position.copy(t.position);
+                wheelMeshes[i].quaternion.copy(t.quaternion);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
